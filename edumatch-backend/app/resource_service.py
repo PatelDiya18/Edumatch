@@ -14,15 +14,12 @@ from .tavily_mcp import search_tavily
 MAX_TAVILY_RESULTS = 10
 MAX_RECOMMENDATIONS = 3
 
-GROQ_MODEL = "openai/gpt-oss-20b"
+GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 # ============================================================
 # GROQ CLIENT
 # ============================================================
-
-client = Groq()
-
 
 # ============================================================
 # FORMAT DEFINITIONS
@@ -543,6 +540,7 @@ async def rank_resources(
 
     print("\nCalling Groq for resource ranking...")
 
+    client = Groq()
     response = client.chat.completions.create(
         model=GROQ_MODEL,
 

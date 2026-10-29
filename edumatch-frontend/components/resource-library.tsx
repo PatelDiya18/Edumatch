@@ -5,18 +5,25 @@ import { Sparkles } from 'lucide-react'
 import { Chip } from '@/components/chip'
 import { ResourceCard } from '@/components/resource-card'
 import { Card } from '@/components/ui/card'
-import { useLearnTwin, type LearningMode } from '@/lib/learn-twin'
-import { resources, type Resource } from '@/lib/resources'
+import { useLearnTwin } from '@/lib/learn-twin'
+import type { Resource } from '@/lib/resources'
 import { cn } from '@/lib/utils'
 
-const filters: ('All' | LearningMode)[] = ['All', 'Visual', 'Text', 'Interactive']
+const filters: ('All' | Resource['format'])[] = ['All', 'visual', 'text', 'interactive']
 
-export function ResourceLibrary() {
+export function ResourceLibrary({ resources }: { resources: Resource[] }) {
   const { twin, applyFeedback } = useLearnTwin()
-  const [filter, setFilter] = useState<'All' | LearningMode>('All')
+  const [filter, setFilter] = useState<'All' | Resource['format']>('All')
 
   const recommended = useMemo(
-    () => resources.filter((r: Resource) => Boolean(r.concept && twin.weakAreas.includes(r.concept))).slice(0, 2),
+    () =>
+      resources
+        .filter((resource) =>
+          twin.weakAreas.some((area) =>
+            `${resource.title} ${resource.reason}`.toLowerCase().includes(area.toLowerCase()),
+          ),
+        )
+        .slice(0, 2),
     [twin.weakAreas],
   )
 
@@ -24,7 +31,7 @@ export function ResourceLibrary() {
     () =>
       filter === 'All'
         ? resources
-        : resources.filter((r: Resource) => r.format === filter || r.format.toLowerCase() === filter.toLowerCase()),
+        : resources.filter((resource) => resource.format === filter),
     [filter],
   )
 
@@ -48,13 +55,17 @@ export function ResourceLibrary() {
         <div className="grid gap-4 md:grid-cols-2">
           {recommended.map((resource: Resource) => (
             <ResourceCard
-              key={resource.id}
+              key={resource.url}
               resource={resource}
               showReason
               onFeedback={(helpful) =>
                 applyFeedback(
                   helpful,
-                  (resource.format.charAt(0).toUpperCase() + resource.format.slice(1)) as LearningMode,
+                  resource.format === 'visual'
+                    ? 'Visual'
+                    : resource.format === 'interactive'
+                      ? 'Interactive'
+                      : 'Text',
                 )
               }
             />
@@ -81,8 +92,8 @@ export function ResourceLibrary() {
 
         {filtered.length > 0 ? (
           <div className="grid gap-4 md:grid-cols-2">
-            {filtered.map((resource: Resource) => (
-              <ResourceCard key={resource.id} resource={resource} />
+            {filtered.map((resource) => (
+              <ResourceCard key={resource.url} resource={resource} />
             ))}
           </div>
         ) : (

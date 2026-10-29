@@ -14,9 +14,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from .database import Base, engine, SessionLocal
-from .models import StudentProfile, Resource, DiagnosticQuestion,DiagnosticResult
+from .models import StudentProfile, Resource, DiagnosticQuestion, DiagnosticResult
 from .ai_service import generate_diagnostic_questions
-from .models import DiagnosticQuestion, DiagnosticResult
 from app.resource_service import (
     get_recommended_resources
 )
@@ -60,29 +59,6 @@ def test():
 
 @app.post("/profile")
 def create_profile(profile: ProfileCreate):
-
-    db = SessionLocal()
-
-    new_profile = StudentProfile(
-        name=profile.name,
-        topic=profile.topic,
-        preferred_format=profile.preferred_format,
-        goal=profile.goal
-    )
-
-    db.add(new_profile)
-    db.commit()
-    db.refresh(new_profile)
-
-    db.close()
-
-    return {
-        "message": "Profile created successfully",
-        "profile_id": new_profile.id
-    }
-@app.post("/profile")
-def create_profile(profile: ProfileCreate):
-
     db = SessionLocal()
 
     try:
@@ -90,7 +66,7 @@ def create_profile(profile: ProfileCreate):
             name=profile.name.strip(),
             topic=profile.topic.strip(),
             preferred_format=profile.preferred_format,
-            goal=profile.goal.strip()
+            goal=profile.goal.strip(),
         )
 
         db.add(new_profile)
@@ -103,7 +79,7 @@ def create_profile(profile: ProfileCreate):
             "name": new_profile.name,
             "topic": new_profile.topic,
             "preferred_format": new_profile.preferred_format,
-            "goal": new_profile.goal
+            "goal": new_profile.goal,
         }
 
     except Exception:
@@ -156,18 +132,6 @@ def get_resources():
     db.close()
 
     return resources
-@app.get("/resources/{topic}")
-def get_resources_by_topic(topic: str):
-
-    db = SessionLocal()
-
-    resources = db.query(Resource).filter(
-        Resource.topic == topic
-    ).all()
-
-    db.close()
-
-    return resources
 @app.post("/quiz/generate/{profile_id}")
 def generate_quiz(profile_id: int):
     db = SessionLocal()
@@ -182,31 +146,43 @@ def generate_quiz(profile_id: int):
 
         ai_result = generate_diagnostic_questions(
             profile.topic,
-            profile.goal
+            profile.goal,
         )
 
-        questions = ai_result["questions"]
+        diagnostic_test = DiagnosticTest.model_validate(ai_result)
+        questions = [
+            {
+                "subtopic": question.subtopic,
+                "question": question.question,
+                "options": question.options,
+                "correct_answer": question.correct_answer,
+                "difficulty": question.difficulty,
+                "explanation": question.explanation,
+            }
+            for question in diagnostic_test.questions
+        ]
+
+        new_questions = [
+            DiagnosticQuestion(
+                profile_id=profile.id,
+                topic=profile.topic,
+                subtopic=question["subtopic"],
+                question=question["question"],
+                option_a=question["options"][0],
+                option_b=question["options"][1],
+                option_c=question["options"][2],
+                option_d=question["options"][3],
+                correct_answer=question["correct_answer"],
+                difficulty=question["difficulty"],
+                explanation=question["explanation"],
+            )
+            for question in questions
+        ]
 
         db.query(DiagnosticQuestion).filter(
             DiagnosticQuestion.profile_id == profile.id
         ).delete(synchronize_session=False)
-
-        for q in questions:
-            new_question = DiagnosticQuestion(
-                profile_id=profile.id,
-                topic=profile.topic,
-                subtopic=q.subtopic,
-                question=q.question,
-                option_a=q.options[0],
-                option_b=q.options[1],
-                option_c=q.options[2],
-                option_d=q.options[3],
-                correct_answer=q.correct_answer,
-                difficulty=q.difficulty,
-                explanation=q.explanation
-            )
-
-            db.add(new_question)
+        db.add_all(new_questions)
 
         db.commit()
 
@@ -216,12 +192,12 @@ def generate_quiz(profile_id: int):
             "question_count": len(questions),
             "questions": [
                 {
-                    "question": question.question,
-                    "options": question.options,
-                    "correct_answer": question.correct_answer,
-                    "subtopic": question.subtopic,
-                    "difficulty": question.difficulty,
-                    "explanation": question.explanation,
+                    "question": question["question"],
+                    "options": question["options"],
+                    "correct_answer": question["correct_answer"],
+                    "subtopic": question["subtopic"],
+                    "difficulty": question["difficulty"],
+                    "explanation": question["explanation"],
                 }
                 for question in questions
             ],
@@ -480,6 +456,8 @@ async def get_resources_by_profile(profile_id: int):
         return {
             "profile_id": profile.id,
 
+            "student_name": profile.name,
+
             "topic": profile.topic,
 
             "goal": profile.goal,
@@ -521,4 +499,16 @@ async def get_resources_by_profile(profile_id: int):
 
     finally:
 
+        db.close()
+
+
+@app.get("/resources/{topic}")
+def get_resources_by_topic(topic: str):
+    db = SessionLocal()
+
+    try:
+        return db.query(Resource).filter(
+            Resource.topic == topic
+        ).all()
+    finally:
         db.close()

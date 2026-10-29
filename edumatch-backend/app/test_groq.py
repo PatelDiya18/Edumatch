@@ -1,7 +1,7 @@
 import os
 
 from dotenv import load_dotenv
-from groq import Groq
+from groq import Groq  # type: ignore[import-not-found]
 
 load_dotenv()
 
@@ -28,7 +28,7 @@ try:
             }
         ],
         temperature=0,
-        max_completion_tokens=20,
+        max_completion_tokens=1024,
     )
 
     print("\nSUCCESS")

@@ -9,8 +9,7 @@ import { Card } from '@/components/ui/card'
 import { useLearnTwin, type LearningMode } from '@/lib/learn-twin'
 import { cn } from '@/lib/utils'
 import { createProfile, generateDiagnosticQuestions } from '@/lib/api'
-
-
+import { saveProfileId } from '@/lib/profile-storage'
 
 const preferences: { value: LearningMode; label: string; desc: string; icon: typeof BookOpen }[] = [
   { value: 'Visual', label: 'Visual', desc: 'Diagrams, videos, animations', icon: BookOpen },
@@ -47,10 +46,11 @@ export function OnboardingWizard() {
 
     const profileId = result.profile_id
 
-    if (!profileId) {
+    if (!Number.isSafeInteger(profileId) || profileId <= 0) {
       throw new Error('Backend did not return a profile ID.')
     }
 
+    saveProfileId(profileId)
     await generateDiagnosticQuestions(profileId)
 
     createTwin({

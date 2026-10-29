@@ -8,11 +8,14 @@ import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
 import { getDiagnosticQuestions } from '@/lib/api'
 import { useLearnTwin, type Baseline, type DiagnosticQuestion } from '@/lib/learn-twin'
+import { getStoredProfileId, saveProfileId } from '@/lib/profile-storage'
 import { cn } from '@/lib/utils'
 
 export function KnowledgeQuiz({ profileId }: { profileId?: string }) {
   const router = useRouter()
   const { twin, seedFromDiagnostic } = useLearnTwin()
+  const [resolvedProfileId, setResolvedProfileId] = useState<number | null>(null)
+  const [isResolvingProfileId, setIsResolvingProfileId] = useState(true)
   const [questions, setQuestions] = useState<DiagnosticQuestion[]>([])
   const [diagnosticTopic, setDiagnosticTopic] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
@@ -21,10 +24,32 @@ export function KnowledgeQuiz({ profileId }: { profileId?: string }) {
   const [answers, setAnswers] = useState<Record<string, number>>({})
   const [result, setResult] = useState<Baseline | null>(null)
 
+  useEffect(() => {
+    try {
+      if (profileId !== undefined) {
+        const parsedProfileId = Number(profileId)
+        if (!Number.isSafeInteger(parsedProfileId) || parsedProfileId <= 0) {
+          throw new Error('Invalid student profile ID. Please start onboarding again.')
+        }
+        saveProfileId(parsedProfileId)
+        setResolvedProfileId(parsedProfileId)
+      } else {
+        setResolvedProfileId(getStoredProfileId())
+      }
+    } catch (error) {
+      setLoadError(error instanceof Error ? error.message : 'Unable to read your saved profile.')
+    } finally {
+      setIsResolvingProfileId(false)
+    }
+  }, [profileId])
+
   const loadQuestions = useCallback(async () => {
-    const parsedProfileId = Number(profileId)
-    if (!profileId || !Number.isInteger(parsedProfileId) || parsedProfileId <= 0) {
-      setLoadError('Start from onboarding to generate questions for your topic.')
+    if (isResolvingProfileId) return
+
+    if (resolvedProfileId === null) {
+      setLoadError((currentError) =>
+        currentError ?? 'Start from onboarding to generate questions for your topic.',
+      )
       setIsLoading(false)
       return
     }
@@ -32,7 +57,7 @@ export function KnowledgeQuiz({ profileId }: { profileId?: string }) {
     setIsLoading(true)
     setLoadError(null)
     try {
-      const generated = await getDiagnosticQuestions(parsedProfileId)
+      const generated = await getDiagnosticQuestions(resolvedProfileId)
       setDiagnosticTopic(generated.topic)
       setQuestions(generated.questions.map((question, index) => ({
         id: `question-${index}`,
@@ -50,7 +75,7 @@ export function KnowledgeQuiz({ profileId }: { profileId?: string }) {
     } finally {
       setIsLoading(false)
     }
-  }, [profileId])
+  }, [isResolvingProfileId, resolvedProfileId])
 
   useEffect(() => {
     void loadQuestions()
@@ -95,7 +120,7 @@ export function KnowledgeQuiz({ profileId }: { profileId?: string }) {
       <div className="mx-auto flex w-full max-w-2xl flex-col gap-4">
         <h1 className="text-2xl font-bold tracking-tight text-foreground">Could not prepare your diagnostic</h1>
         <p className="text-sm text-destructive" role="alert">{loadError}</p>
-        {profileId ? (
+        {resolvedProfileId !== null ? (
           <Button size="lg" className="h-11 w-fit rounded-xl" onClick={() => void loadQuestions()}>
             Try again
             <RotateCcw className="size-4" />

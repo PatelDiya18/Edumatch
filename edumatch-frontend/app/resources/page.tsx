@@ -1,18 +1,40 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 
 import {
     getRecommendedResources,
     type ResourceResponse,
 } from "@/lib/resources";
+import { getStoredProfileId, saveProfileId } from "@/lib/profile-storage";
 
 
 export default function ResourcesPage() {
+    return (
+        <Suspense
+            fallback={
+                <main className="p-8">
+                    <h1 className="text-2xl font-bold">
+                        Finding your resources...
+                    </h1>
+
+                    <p className="mt-2">
+                        EduMatch is finding resources
+                        based on your learning profile.
+                    </p>
+                </main>
+            }
+        >
+            <ResourcesContent />
+        </Suspense>
+    );
+}
+
+function ResourcesContent() {
     const searchParams = useSearchParams();
 
-    const profileId = searchParams.get("profileId");
+    const profileId = searchParams.get("id");
 
     const [data, setData] =
         useState<ResourceResponse | null>(null);
@@ -26,32 +48,32 @@ export default function ResourcesPage() {
 
     useEffect(() => {
         async function loadResources() {
-
-            if (!profileId) {
-                setError(
-                    "Student profile ID is missing. Please complete onboarding and the diagnostic quiz."
-                );
-
-                setLoading(false);
-                return;
-            }
-
-            const id = Number(profileId);
-
-            if (!Number.isInteger(id) || id <= 0) {
-                setError("Invalid student profile ID.");
-                setLoading(false);
-                return;
-            }
-
             try {
+                const resolvedProfileId =
+                    profileId === null
+                        ? getStoredProfileId()
+                        : Number(profileId);
+
+                if (resolvedProfileId === null) {
+                    setError(
+                        "Student profile ID is missing. Please complete onboarding and the diagnostic quiz."
+                    );
+                    return;
+                }
+
+                if (!Number.isSafeInteger(resolvedProfileId) || resolvedProfileId <= 0) {
+                    setError("Invalid student profile ID.");
+                    return;
+                }
+
+                saveProfileId(resolvedProfileId);
                 console.log(
                     "Fetching resources for profile:",
-                    id
+                    resolvedProfileId
                 );
 
                 const result =
-                    await getRecommendedResources(id);
+                    await getRecommendedResources(resolvedProfileId);
 
                 console.log(
                     "Resources received:",

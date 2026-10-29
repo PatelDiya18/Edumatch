@@ -31,10 +31,10 @@ export interface ResourceResponse {
 
 
 export async function getRecommendedResources(
-    profileId: number
+    id: number
 ): Promise<ResourceResponse> {
 
-    if (!Number.isInteger(profileId) || profileId <= 0) {
+    if (!Number.isInteger(id) || id <= 0) {
         throw new Error(
             "Invalid student profile ID."
         );
@@ -42,7 +42,7 @@ export async function getRecommendedResources(
 
 
     const response = await fetch(
-        `${API_URL}/resources/${profileId}`,
+        `${API_URL}/resources/${id}`,
         {
             cache: "no-store",
         }
