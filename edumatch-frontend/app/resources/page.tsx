@@ -177,56 +177,126 @@ function ResourcesContent() {
             </div>
 
 
-            <div className="grid gap-6">
+            
 
-                {data.resources.map(
-                    (resource, index) => (
+<div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
 
-                        <article
-                            key={resource.url}
-                            className="rounded-xl border p-6 shadow-sm"
+    {data.preferred_recommendations.map(
+        (resource, index) => (
+
+            <article
+                key={resource.url}
+                className="rounded-xl border p-6 shadow-sm"
+            >
+
+                <p className="text-sm font-medium text-green-600">
+                    Preferred Resource #{index + 1}
+                </p>
+
+                <h2 className="mt-2 text-xl font-semibold">
+                    {resource.title}
+                </h2>
+
+                <p className="mt-3 text-gray-600">
+                    {resource.reason}
+                </p>
+
+                <div className="mt-4 flex flex-wrap gap-4 text-sm">
+
+                    <span className="capitalize">
+                        Format: {resource.format}
+                    </span>
+
+                    <span>
+                        Match: {resource.relevance_score}/100
+                    </span>
+
+                </div>
+
+                <a
+                    href={resource.url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-5 inline-block rounded-lg border px-4 py-2 hover:bg-gray-100"
+                >
+                    Open Resource →
+                </a>
+
+            </article>
+        )
+    )}
+
+</div>
+
+
+{/* Alternative Format Resources */}
+
+{data.alternative_recommendations.length > 0 && (
+
+    <section className="mt-12">
+
+        <h2 className="text-2xl font-bold">
+            You Should Also Explore
+        </h2>
+
+        <p className="mt-2 text-gray-500">
+            We found fewer resources in your preferred learning
+            format. These alternatives may also help you achieve
+            your learning goal.
+        </p>
+
+        <div className="mt-6 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
+
+            {data.alternative_recommendations.map(
+                (resource, index) => (
+
+                    <article
+                        key={resource.url}
+                        className="rounded-xl border border-orange-200 p-6 shadow-sm"
+                    >
+
+                        <p className="text-sm font-medium text-orange-600">
+                            Alternative Resource #{index + 1}
+                        </p>
+
+                        <h2 className="mt-2 text-xl font-semibold">
+                            {resource.title}
+                        </h2>
+
+                        <p className="mt-3 text-gray-600">
+                            {resource.reason}
+                        </p>
+
+                        <div className="mt-4 flex flex-wrap gap-4 text-sm">
+
+                            <span className="capitalize">
+                                Format: {resource.format}
+                            </span>
+
+                            <span>
+                                Match: {resource.relevance_score}/100
+                            </span>
+
+                        </div>
+
+                        <a
+                            href={resource.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-5 inline-block rounded-lg border px-4 py-2 hover:bg-gray-100"
                         >
+                            Open Resource →
+                        </a>
 
-                            <p className="text-sm text-gray-500">
-                                Resource #{index + 1}
-                            </p>
+                    </article>
+                )
+            )}
 
-                            <h2 className="mt-2 text-xl font-semibold">
-                                {resource.title}
-                            </h2>
+        </div>
 
-                            <p className="mt-3">
-                                {resource.reason}
-                            </p>
+    </section>
 
-                            <div className="mt-4 flex gap-4">
-
-                                <span>
-                                    Format:{" "}
-                                    {resource.format}
-                                </span>
-
-                                <span>
-                                    Match:{" "}
-                                    {resource.relevance_score}/100
-                                </span>
-
-                            </div>
-
-                            <a
-                                href={resource.url}
-                                target="_blank"
-                                rel="noopener noreferrer"
-                                className="mt-5 inline-block rounded-lg border px-4 py-2"
-                            >
-                                Open Resource →
-                            </a>
-
-                        </article>
-                    )
-                )}
-
-            </div>
+)}
 
         </main>
     );

@@ -1,12 +1,25 @@
 
 import json
+import importlib
 import logging
 import os
 import time
-from groq import Groq
+from pathlib import Path
+
+from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
 
+# Find the backend folder
+BASE_DIR = Path(__file__).resolve().parent.parent
+
+# Locate the .env file inside the backend folder
+ENV_FILE = BASE_DIR / ".env"
+
+# Load environment variables
+load_dotenv(ENV_FILE, override=True)
+
+# Read Groq API key
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 if not GROQ_API_KEY:
@@ -17,11 +30,21 @@ if not GROQ_API_KEY:
 GROQ_MODEL = "openai/gpt-oss-120b"
 
 
+
 def generate_diagnostic_questions(
     topic: str,
     goal: str
 ):
-    client = Groq()
+    try:
+        groq_module = importlib.import_module("groq")
+    except ModuleNotFoundError as exc:
+        if exc.name != "groq":
+            raise
+        raise RuntimeError(
+            "The Groq package is required. Install it with 'pip install groq'."
+        ) from exc
+
+    client = groq_module.Groq()
 
     prompt = f"""
 Create a diagnostic quiz to assess a student's understanding.

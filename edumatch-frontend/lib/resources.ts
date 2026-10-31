@@ -26,63 +26,36 @@ export interface ResourceResponse {
     level: string;
     preferred_format: ResourceFormat;
     resource_count: number;
-    resources: Resource[];
+    preferred_recommendations: Resource[];
+    alternative_recommendations: Resource[];
 }
-
-
 export async function getRecommendedResources(
-    id: number
+  profileId: number | string
 ): Promise<ResourceResponse> {
-
-    if (!Number.isInteger(id) || id <= 0) {
-        throw new Error(
-            "Invalid student profile ID."
-        );
+  const response = await fetch(
+    `${API_URL}/resources/profile/${profileId}`,
+    {
+      method: "GET",
+      cache: "no-store",
     }
+  );
 
+  if (!response.ok) {
+    const errorData = await response.json().catch(() => null);
 
-    const response = await fetch(
-        `${API_URL}/resources/${id}`,
-        {
-            cache: "no-store",
-        }
+    throw new Error(
+      errorData?.detail || "Unable to load resources"
     );
+  }
 
+  const data: ResourceResponse = await response.json();
 
-    let data: any;
+  if (
+    !Array.isArray(data.preferred_recommendations) ||
+    !Array.isArray(data.alternative_recommendations)
+  ) {
+    throw new Error("Invalid resource response from backend.");
+  }
 
-    try {
-        data = await response.json();
-    } catch {
-        throw new Error(
-            "Backend returned an invalid response."
-        );
-    }
-
-
-    if (!response.ok) {
-
-        const detail =
-            data?.detail ||
-            "Failed to fetch resources.";
-
-        throw new Error(
-            typeof detail === "string"
-                ? detail
-                : JSON.stringify(detail)
-        );
-    }
-
-
-    if (
-        !data ||
-        !Array.isArray(data.resources)
-    ) {
-        throw new Error(
-            "Backend returned invalid resource data."
-        );
-    }
-
-
-    return data as ResourceResponse;
+  return data;
 }
