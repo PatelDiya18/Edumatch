@@ -183,13 +183,16 @@ def build_search_query(
     }
 
     query = (
-        f"Best {level} {topic} learning resources "
-        f"for someone whose goal is {goal}. "
-        f"Find genuine {preferred_format} learning resources, "
-        f"specifically {format_queries[preferred_format]}. "
-        f"Prioritize reputable educational websites and "
-        f"resources suitable for {level} learners."
-    )
+    f"Find high-quality beginner learning resources for {topic}. "
+    f"The student's goal is {goal}. "
+    f"Find resources across all three formats: "
+    f"interactive tutorials, coding exercises and practice platforms; "
+    f"visual video lessons, demonstrations and animations; "
+    f"text-based documentation, articles and written tutorials. "
+    f"Prioritize reputable educational websites and resources "
+    f"suitable for beginner learners. "
+    f"Return a diverse collection of relevant resources."
+)
 
     return query
 
@@ -483,15 +486,13 @@ Return ONLY valid JSON in this exact structure:
 
 IMPORTANT:
 
-- preferred_recommendations must contain ONLY {preferred_format} resources.
-- alternative_recommendations must contain resources from other formats.
-- Return a maximum of 3 resources COMBINED across both arrays.
-- Prioritize preferred resources before alternatives.
-- Use only exact URLs from the Tavily results.
-- Do not duplicate resources.
-- relevance_score must be an integer between 0 and 100.
-- Never invent ratings or reviews.
-- Return empty arrays if no suitable resources exist.
+-1. Select preferred-format resources first.
+2. If fewer than 3 suitable preferred-format resources exist,
+   select suitable resources from other formats.
+3. Never put a preferred-format resource in the alternatives array.
+4. Return up to 3 resources in total.
+5. Do not return empty arrays if suitable resources exist.
+6. Only use resources from the supplied list.
 
 RESOURCES:
 
@@ -712,7 +713,15 @@ async def rank_resources(
             "preferred_recommendations": [],
             "alternative_recommendations": [],
         }
+    print("\n========== RESOURCES RECEIVED BY GROQ ==========")
 
+    for index, resource in enumerate(resources, start=1):
+        print(f"\nResource {index}:")
+        print("Title:", resource.get("title"))
+        print("URL:", resource.get("url"))
+        print("Description:", resource.get("description"))
+
+    print("\n========== END OF RESOURCES ==========")
     prompt = build_groq_prompt(
         topic=topic,
         level=level,
@@ -746,6 +755,9 @@ async def rank_resources(
     )
 
     raw_text = response.choices[0].message.content
+    print("\n========== RAW GROQ RESPONSE ==========")
+    print(raw_text)
+    print("=======================================")        
 
     if not raw_text:
         raise RuntimeError("Groq returned an empty response.")

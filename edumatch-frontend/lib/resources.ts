@@ -40,22 +40,18 @@ export async function getRecommendedResources(
     }
   );
 
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => null);
+  const data = await response.json().catch(() => null);
 
-    throw new Error(
-      errorData?.detail || "Unable to load resources"
-    );
+  if (!response.ok) {
+    throw new Error(data?.detail || "Unable to load resources");
   }
 
-  const data: ResourceResponse = await response.json();
-
   if (
-    !Array.isArray(data.preferred_recommendations) ||
-    !Array.isArray(data.alternative_recommendations)
+    !Array.isArray(data?.preferred_recommendations) ||
+    !Array.isArray(data?.alternative_recommendations)
   ) {
     throw new Error("Invalid resource response from backend.");
   }
 
-  return data;
+  return data as ResourceResponse;
 }

@@ -1,3 +1,4 @@
+from importlib import resources
 import logging
 
 from fastapi import FastAPI, HTTPException
@@ -409,32 +410,36 @@ def submit_quiz(submission: QuizSubmission):
     finally:
         db.close()
 
+
 @app.get("/resources/profile/{profile_id}")
 async def get_resources_by_profile(profile_id: int):
     db = SessionLocal()
 
     try:
-        profile = db.query(StudentProfile).filter(StudentProfile.id == profile_id).first()
+        profile = (
+            db.query(StudentProfile)
+            .filter(StudentProfile.id == profile_id)
+            .first()
+        )
 
         if profile is None:
-            raise HTTPException(status_code=404, detail="Profile not found")
+            raise HTTPException(
+                status_code=404,
+                detail="Profile not found"
+            )
 
         level = getattr(profile, "learning_level", None) or "beginner"
 
         if not profile.topic:
             raise HTTPException(status_code=400, detail="Profile has no topic.")
+
         if not profile.goal:
             raise HTTPException(status_code=400, detail="Profile has no goal.")
+
         if not profile.preferred_format:
             raise HTTPException(status_code=400, detail="Profile has no preferred format.")
 
-        try:
-            from app.resource_service import get_recommended_resources
-        except ModuleNotFoundError as exc:
-            raise HTTPException(
-                status_code=503,
-                detail="Resource recommendation dependency is not installed.",
-            ) from exc
+        from app.resource_service import get_recommended_resources
 
         resources = await get_recommended_resources(
             topic=profile.topic,
@@ -443,25 +448,45 @@ async def get_resources_by_profile(profile_id: int):
             goal=profile.goal,
         )
 
+        preferred = resources.get("preferred_recommendations", [])
+        alternatives = resources.get("alternative_recommendations", [])
+
+        print("\n========== API RESPONSE DEBUG ==========")
+        print("Preferred:", len(preferred))
+        print("Alternatives:", len(alternatives))
+        print("Total:", len(preferred) + len(alternatives))
+        print("========================================")
+
         return {
             "profile_id": profile.id,
-
+            "student_name": profile.name,
             "topic": profile.topic,
             "goal": profile.goal,
             "level": level,
-            "preferred_format": profile.preferred_format,
-            "resource_count": len(resources),
-            "resources": resources,
+            "preferred_format": resources.get(
+                "preferred_format",
+                profile.preferred_format
+            ),
+            "resource_count": len(preferred) + len(alternatives),
+            "preferred_recommendations": preferred,
+            "alternative_recommendations": alternatives,
         }
+
     except HTTPException:
         raise
+
     except Exception as exc:
         db.rollback()
-        logger.exception("Resource generation failed for profile %s", profile_id)
+        logger.exception(
+            "Resource generation failed for profile %s",
+            profile_id
+        )
+
         raise HTTPException(
             status_code=500,
-            detail=f"Resource generation failed: {str(exc)}",
+            detail=f"Resource generation failed: {str(exc)}"
         ) from exc
+
     finally:
         db.close()
 
