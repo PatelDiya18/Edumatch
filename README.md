@@ -1,9 +1,1 @@
 # Edumatch
-
-## Run the application
-
-The frontend talks to FastAPI through its same-origin `/api/backend` route. The route stores JWTs in an HttpOnly cookie and forwards them as bearer tokens; access tokens are not exposed to browser JavaScript.
-
-Set `JWT_SECRET_KEY` in `edumatch-backend/.env` to a strong private value before starting the backend. Generate one with `python -c "import secrets; print(secrets.token_urlsafe(32))"`; do not commit it.
-
-Start FastAPI from `edumatch-backend` with `uvicorn app.main:app --reload`, then start the frontend from `edumatch-frontend` with `npm run dev`. Set `BACKEND_URL` for the frontend server if FastAPI is not running at `http://127.0.0.1:8000`. Existing SQLite databases are migrated on backend startup.
