@@ -53,24 +53,16 @@ export function LandingHero() {
           <Button
             size="lg"
             className="h-11 rounded-xl px-5 text-base"
-            render={<Link href="/onboarding" />}
+            render={<Link href="/auth" />}
           >
             Create my Learning Twin
             <ArrowRight className="size-4" />
           </Button>
-          <Button
-            variant="outline"
-            size="lg"
-            className="h-11 rounded-xl px-5 text-base"
-            render={<Link href="/quiz" />}
-          >
-            <ListChecks className="size-4" />
-            Try the diagnostic
-          </Button>
+          
         </div>
         <p className="pt-1 text-sm text-muted-foreground">
           Already have a twin?{' '}
-          <Link href="/dashboard" className="font-medium text-primary hover:underline">
+          <Link href="/auth" className="font-medium text-primary hover:underline">
             Go to your dashboard
           </Link>
         </p>

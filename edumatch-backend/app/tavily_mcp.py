@@ -20,6 +20,22 @@ if ENV_FILE.exists():
 TAVILY_MCP_URL = os.getenv("TAVILY_MCP_URL")
 
 
+class TavilySearchError(RuntimeError):
+    """Raised when the Tavily MCP search provider cannot be reached."""
+
+
+def _exception_group_types(group: BaseExceptionGroup) -> list[str]:
+    exception_types = []
+
+    for exception in group.exceptions:
+        if isinstance(exception, BaseExceptionGroup):
+            exception_types.extend(_exception_group_types(exception))
+        else:
+            exception_types.append(type(exception).__name__)
+
+    return exception_types
+
+
 # ============================================================
 # 2. VALIDATE TAVILY URL
 # ============================================================
@@ -375,49 +391,23 @@ async def search_tavily(
         print("=" * 70)
         print("[EduMatch] TAVILY MCP EXCEPTION")
         print("=" * 70)
+        print(f"Exception type: {type(exc).__name__}")
 
-        print(
-            f"Exception type: {type(exc).__name__}"
-        )
-
-        print(
-            f"Exception message: {exc}"
-        )
-
-        print(
-            f"Exception repr: {repr(exc)}"
-        )
-
-        # ExceptionGroup contains the actual underlying
-        # MCP/network exception.
         if isinstance(exc, BaseExceptionGroup):
-
-            print()
-            print("ExceptionGroup details:")
-
-            for index, sub_exception in enumerate(
-                exc.exceptions,
-                start=1
-            ):
-
-                print(
-                    f"\n--- Sub-exception {index} ---"
+            exception_types = sorted(set(_exception_group_types(exc)))
+            print(
+                "[EduMatch] Tavily MCP underlying exception types: "
+                + ", ".join(exception_types)
+            )
+            raise TavilySearchError(
+                "Tavily resource search is unavailable"
+                + (
+                    f" ({', '.join(exception_types)})"
+                    if exception_types
+                    else ""
                 )
-
-                print(
-                    f"Type: "
-                    f"{type(sub_exception).__name__}"
-                )
-
-                print(
-                    f"Message: "
-                    f"{sub_exception}"
-                )
-
-                print(
-                    f"Repr: "
-                    f"{repr(sub_exception)}"
-                )
+                + ". Verify the configured Tavily MCP endpoint and backend connectivity."
+            ) from exc
 
         print("=" * 70)
 

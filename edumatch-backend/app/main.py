@@ -1,21 +1,29 @@
-from importlib import resources
 import logging
 
-from fastapi import FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-
-from .database import Base, engine, SessionLocal
-from .models import StudentProfile, Resource, DiagnosticQuestion,DiagnosticResult
-from .ai_service import generate_diagnostic_questions
-from .models import DiagnosticQuestion, DiagnosticResult
-from app.resource_service import (
-    get_recommended_resources
+from pydantic import BaseModel, Field
+from sqlalchemy.orm import Session
+from .database import Base, SessionLocal, engine
+from .models import (
+    DiagnosticQuestion,
+    DiagnosticResult,
+    LearningProgress,
+    Resource,
+    StudentProfile,
+    User,
 )
+from .ai_service import generate_diagnostic_questions
+from app.resource_service import get_recommended_resources
+from app.auth_routes import router as auth_router
+from app.auth import get_current_user, get_db
+from app.migrate_auth import migrate_auth_schema
+from app.tavily_mcp import TavilySearchError
 
 logger = logging.getLogger(__name__)
 
 app = FastAPI(title="EduMatch API")
+app.include_router(auth_router)
 
 app.add_middleware(
     CORSMiddleware,
@@ -30,6 +38,7 @@ app.add_middleware(
 
 
 Base.metadata.create_all(bind=engine)
+migrate_auth_schema()
 
 
 class ProfileCreate(BaseModel):
@@ -51,7 +60,7 @@ class ResourceCreate(BaseModel):
 
 class QuizAnswer(BaseModel):
     question_id: int
-    selected_answer: str
+    selected_answer: int = Field(ge=0, le=3)
 
 
 class QuizSubmission(BaseModel):
@@ -70,11 +79,14 @@ def test():
 
 
 @app.post("/profile")
-def create_profile(profile: ProfileCreate):
-    db = SessionLocal()
-
+def create_profile(
+    profile: ProfileCreate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
     try:
         new_profile = StudentProfile(
+            user_id=current_user.id,
             name=profile.name.strip(),
             topic=profile.topic.strip(),
             preferred_format=profile.preferred_format,
@@ -88,6 +100,7 @@ def create_profile(profile: ProfileCreate):
         return {
             "message": "Profile created successfully",
             "profile_id": new_profile.id,
+            "user_id": new_profile.user_id,
             "name": new_profile.name,
             "topic": new_profile.topic,
             "preferred_format": new_profile.preferred_format,
@@ -96,8 +109,29 @@ def create_profile(profile: ProfileCreate):
     except Exception:
         db.rollback()
         raise
-    finally:
-        db.close()
+
+
+@app.get("/profile/me")
+def get_my_profile(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = (
+        db.query(StudentProfile)
+        .filter(StudentProfile.user_id == current_user.id)
+        .order_by(StudentProfile.id.desc())
+        .first()
+    )
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No profile found for this user.")
+
+    return {
+        "profile_id": profile.id,
+        "name": profile.name,
+        "topic": profile.topic,
+        "preferred_format": profile.preferred_format,
+        "goal": profile.goal,
+    }
 
 
 @app.post("/resources")
@@ -122,6 +156,7 @@ def create_resource(resource: ResourceCreate):
         return {
             "message": "Resource created successfully",
             "resource_id": new_resource.id,
+            "user_id": new_resource.user_id,
         }
     except Exception:
         db.rollback()
@@ -134,176 +169,169 @@ def create_resource(resource: ResourceCreate):
 def get_resources():
     db = SessionLocal()
 
-    resources = db.query(Resource).all()
+    try:
+        resources = db.query(Resource).all()
+        return resources
 
-    db.close()
+    finally:
+        db.close()
 
-    return resources
+
 @app.get("/resources/{topic}")
 def get_resources_by_topic(topic: str):
-
-    db = SessionLocal()
-
-    resources = db.query(Resource).filter(
-        Resource.topic == topic
-    ).all()
-
-    db.close()
-
-
-
-@app.post("/quiz/generate/{profile_id}")
-def generate_quiz(profile_id: int):
     db = SessionLocal()
 
     try:
-        # 1. Find the student profile
-        profile = db.query(StudentProfile).filter(
-            StudentProfile.id == profile_id
-        ).first()
+        resources = db.query(Resource).filter(
+            Resource.topic == topic
+        ).all()
 
-        if profile is None:
-            raise HTTPException(
-                status_code=404,
-                detail="Profile not found"
-            )
+        return resources
 
-        # 2. Generate questions using Groq
-        ai_result = generate_diagnostic_questions(
-            profile.topic,
-            profile.goal
-        )
+    finally:
+        db.close()
 
-        questions = ai_result["questions"]
 
-        # 3. Delete previously generated questions
+@app.post("/quiz/generate/{profile_id}")
+def generate_quiz(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(StudentProfile).filter(
+        StudentProfile.id == profile_id,
+        StudentProfile.user_id == current_user.id,
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found for this user.")
+
+    try:
+        generated = generate_diagnostic_questions(profile.topic, profile.goal)
+        generated_questions = generated.get("questions")
+        if not isinstance(generated_questions, list) or len(generated_questions) != 10:
+            raise ValueError("The quiz generator must return exactly 10 questions.")
+
         db.query(DiagnosticQuestion).filter(
             DiagnosticQuestion.profile_id == profile.id
         ).delete(synchronize_session=False)
 
-        # 4. Store newly created questions
-        created_questions = []
+        questions = []
+        for item in generated_questions:
+            if not isinstance(item, dict) or len(item.get("options", [])) != 4:
+                raise ValueError("The quiz generator returned an invalid question.")
 
-        for q in questions:
-            new_question = DiagnosticQuestion(
+            question = DiagnosticQuestion(
                 profile_id=profile.id,
                 topic=profile.topic,
-                subtopic=q["subtopic"],
-                question=q["question"],
-                option_a=q["options"][0],
-                option_b=q["options"][1],
-                option_c=q["options"][2],
-                option_d=q["options"][3],
-                correct_answer=q["correct_answer"],
-                difficulty=q["difficulty"],
-                explanation=q["explanation"]
+                subtopic=item["subtopic"],
+                question=item["question"],
+                option_a=item["options"][0],
+                option_b=item["options"][1],
+                option_c=item["options"][2],
+                option_d=item["options"][3],
+                correct_answer=item["correct_answer"],
+                difficulty=item["difficulty"],
+                explanation=item["explanation"],
             )
+            db.add(question)
+            questions.append(question)
 
-            db.add(new_question)
-            created_questions.append(new_question)
-
-        # 5. Save questions to database
+        db.flush()
+        response_questions = [
+            {
+                "id": question.id,
+                "question": question.question,
+                "options": [
+                    question.option_a,
+                    question.option_b,
+                    question.option_c,
+                    question.option_d,
+                ],
+                "subtopic": question.subtopic,
+                "difficulty": question.difficulty,
+            }
+            for question in questions
+        ]
         db.commit()
-
-        # 6. Return generated questions
-        return {
-            "message": "Diagnostic test generated successfully",
-            "profile_id": profile_id,
-            "question_count": len(created_questions),
-            "questions": [
-                {
-                    "question": question.question,
-                    "options": [
-                        question.option_a,
-                        question.option_b,
-                        question.option_c,
-                        question.option_d
-                    ],
-                    "correct_answer": question.correct_answer,
-                    "subtopic": question.subtopic,
-                    "difficulty": question.difficulty,
-                    "explanation": question.explanation
-                }
-                for question in created_questions
-            ]
-        }
-
-    except HTTPException:
-        db.rollback()
-        raise
-
-    except Exception as exc:
-        db.rollback()
-
-        logger.exception(
-            "Failed to generate diagnostic questions for profile %s",
-            profile_id
-        )
-
-        raise HTTPException(
-            status_code=502,
-            detail="Unable to generate diagnostic questions. Please try again."
-        ) from exc
-
-    finally:
-        db.close()
-
-@app.get("/quiz/{profile_id}")
-def get_quiz(profile_id: int):
-    db = SessionLocal()
-
-    try:
-        profile = db.query(StudentProfile).filter(StudentProfile.id == profile_id).first()
-        if profile is None:
-            raise HTTPException(status_code=404, detail="Profile not found")
-
-        questions = (
-            db.query(DiagnosticQuestion)
-            .filter(DiagnosticQuestion.profile_id == profile.id)
-            .order_by(DiagnosticQuestion.id)
-            .all()
-        )
-
-        if not questions:
-            raise HTTPException(
-                status_code=404,
-                detail="No diagnostic questions found for this profile.",
-            )
-
         return {
             "profile_id": profile.id,
             "topic": profile.topic,
-            "question_count": len(questions),
-            "questions": [
-                {
-                    "question": question.question,
-                    "options": [
-                        question.option_a,
-                        question.option_b,
-                        question.option_c,
-                        question.option_d,
-                    ],
-                    "correct_answer": question.correct_answer,
-                    "subtopic": question.subtopic,
-                    "difficulty": question.difficulty,
-                    "explanation": question.explanation,
-                }
-                for question in questions
-            ],
+            "question_count": len(response_questions),
+            "questions": response_questions,
         }
-    finally:
-        db.close()
+    except HTTPException:
+        db.rollback()
+        raise
+    except Exception as exc:
+        db.rollback()
+        logger.exception("Quiz generation failed for profile %s", profile_id)
+        raise HTTPException(
+            status_code=502,
+            detail="Unable to generate your personalized diagnostic. Please try again.",
+        ) from exc
+
+
+@app.get("/quiz/{profile_id}")
+def get_quiz(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(StudentProfile).filter(
+        StudentProfile.id == profile_id,
+        StudentProfile.user_id == current_user.id,
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    questions = (
+        db.query(DiagnosticQuestion)
+        .filter(DiagnosticQuestion.profile_id == profile.id)
+        .order_by(DiagnosticQuestion.id)
+        .all()
+    )
+
+    if not questions:
+        raise HTTPException(
+            status_code=404,
+            detail="No diagnostic questions found for this profile.",
+        )
+
+    return {
+        "profile_id": profile.id,
+        "topic": profile.topic,
+        "question_count": len(questions),
+        "questions": [
+            {
+                "id": question.id,
+                "question": question.question,
+                "options": [
+                    question.option_a,
+                    question.option_b,
+                    question.option_c,
+                    question.option_d,
+                ],
+                "subtopic": question.subtopic,
+                "difficulty": question.difficulty,
+            }
+            for question in questions
+        ],
+    }
 
 
 
 @app.post("/quiz/submit")
-def submit_quiz(submission: QuizSubmission):
-    db = SessionLocal()
-
+def submit_quiz(
+    submission: QuizSubmission,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
     try:
-        # 1. Check whether the student profile exists
+        # 1. Check whether the profile exists
+        # and belongs to the logged-in user
         profile = db.query(StudentProfile).filter(
-            StudentProfile.id == submission.profile_id
+            StudentProfile.id == submission.profile_id,
+            StudentProfile.user_id == current_user.id
         ).first()
 
         if profile is None:
@@ -366,9 +394,10 @@ def submit_quiz(submission: QuizSubmission):
         else:
             level = "Beginner"
 
-        # 7. Save quiz result
+        # 7. Save assessment result in database
         result = DiagnosticResult(
             profile_id=submission.profile_id,
+            user_id=current_user.id,
             score=score,
             total_questions=total_questions,
             percentage=percentage,
@@ -377,20 +406,43 @@ def submit_quiz(submission: QuizSubmission):
 
         db.add(result)
 
-        # 8. Update student's learning profile
-        profile.learning_level = level
+        db.add(
+            LearningProgress(
+                profile_id=profile.id,
+                assessment_type="diagnostic",
+                score=percentage,
+                level=level,
+            )
+        )
 
+        answer_by_question_id = {
+            answer.question_id: answer for answer in submission.answers
+        }
+
+        # 9. Commit and refresh database record
         db.commit()
         db.refresh(result)
 
-        # 9. Return result
+        # 10. Return assessment result
         return {
             "message": "Quiz submitted successfully",
             "profile_id": submission.profile_id,
             "score": score,
             "total_questions": total_questions,
+            "correct_answers": score,
+            "wrong_answers": total_questions - score,
             "percentage": round(percentage, 2),
-            "level": level
+            "level": level,
+            "answer_review": [
+                {
+                    "question_id": question.id,
+                    "selected_answer": answer_by_question_id[question.id].selected_answer,
+                    "correct_answer": question.correct_answer,
+                    "subtopic": question.subtopic,
+                    "explanation": question.explanation,
+                }
+                for question in questions
+            ],
         }
 
     except HTTPException:
@@ -399,7 +451,6 @@ def submit_quiz(submission: QuizSubmission):
 
     except Exception as exc:
         db.rollback()
-
         logger.exception("Quiz submission failed")
 
         raise HTTPException(
@@ -407,18 +458,21 @@ def submit_quiz(submission: QuizSubmission):
             detail="Failed to submit diagnostic quiz"
         ) from exc
 
-    finally:
-        db.close()
-
 
 @app.get("/resources/profile/{profile_id}")
-async def get_resources_by_profile(profile_id: int):
+async def get_resources_by_profile(
+    profile_id: int,
+    current_user: User = Depends(get_current_user),
+):
     db = SessionLocal()
 
     try:
         profile = (
             db.query(StudentProfile)
-            .filter(StudentProfile.id == profile_id)
+            .filter(
+                StudentProfile.id == profile_id,
+                StudentProfile.user_id == current_user.id,
+            )
             .first()
         )
 
@@ -428,7 +482,19 @@ async def get_resources_by_profile(profile_id: int):
                 detail="Profile not found"
             )
 
-        level = getattr(profile, "learning_level", None) or "beginner"
+        latest_result = (
+            db.query(DiagnosticResult)
+            .filter(
+                DiagnosticResult.user_id == current_user.id,
+                DiagnosticResult.profile_id == profile.id,
+            )
+            .order_by(
+                DiagnosticResult.created_at.desc(),
+                DiagnosticResult.id.desc(),
+            )
+            .first()
+        )
+        level = latest_result.level if latest_result else "beginner"
 
         if not profile.topic:
             raise HTTPException(status_code=400, detail="Profile has no topic.")
@@ -439,8 +505,6 @@ async def get_resources_by_profile(profile_id: int):
         if not profile.preferred_format:
             raise HTTPException(status_code=400, detail="Profile has no preferred format.")
 
-        from app.resource_service import get_recommended_resources
-
         resources = await get_recommended_resources(
             topic=profile.topic,
             level=level,
@@ -450,12 +514,6 @@ async def get_resources_by_profile(profile_id: int):
 
         preferred = resources.get("preferred_recommendations", [])
         alternatives = resources.get("alternative_recommendations", [])
-
-        print("\n========== API RESPONSE DEBUG ==========")
-        print("Preferred:", len(preferred))
-        print("Alternatives:", len(alternatives))
-        print("Total:", len(preferred) + len(alternatives))
-        print("========================================")
 
         return {
             "profile_id": profile.id,
@@ -474,6 +532,17 @@ async def get_resources_by_profile(profile_id: int):
 
     except HTTPException:
         raise
+
+    except TavilySearchError as exc:
+        logger.error(
+            "Tavily resource search failed for profile %s: %s",
+            profile_id,
+            exc,
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=str(exc),
+        ) from exc
 
     except Exception as exc:
         db.rollback()
@@ -499,5 +568,111 @@ def get_resources_by_topic(topic: str):
         return db.query(Resource).filter(
             Resource.topic == topic
         ).all()
+    finally:
+        db.close()
+
+@app.get("/dashboard")
+def get_dashboard(
+    current_user: User = Depends(get_current_user)
+):
+    db = SessionLocal()
+
+    try:
+        profiles = (
+            db.query(StudentProfile)
+            .filter(StudentProfile.user_id == current_user.id)
+            .order_by(StudentProfile.id.desc())
+            .all()
+        )
+
+        dashboard_profiles = []
+
+        for profile in profiles:
+
+            progress_records = (
+                db.query(LearningProgress)
+                .filter(
+                    LearningProgress.profile_id == profile.id
+                )
+                .order_by(
+                    LearningProgress.attempted_at.desc()
+                )
+                .all()
+            )
+
+            latest = progress_records[0] if progress_records else None
+
+            previous = (
+                progress_records[1]
+                if len(progress_records) > 1
+                else None
+            )
+
+            improvement = None
+
+            if latest and previous:
+                improvement = round(
+                    latest.score - previous.score, 2
+                )
+
+            latest_diagnostic = (
+                db.query(DiagnosticResult)
+                .filter(
+                    DiagnosticResult.user_id == current_user.id,
+                    DiagnosticResult.profile_id == profile.id,
+                )
+                .order_by(
+                    DiagnosticResult.created_at.desc(),
+                    DiagnosticResult.id.desc(),
+                )
+                .first()
+            )
+
+            dashboard_profiles.append({
+                "profile_id": profile.id,
+                "topic": profile.topic,
+                "goal": profile.goal,
+                "preferred_format": profile.preferred_format,
+                "current_level": (
+                    latest_diagnostic.level
+                    if latest_diagnostic
+                    else latest.level
+                    if latest
+                    else getattr(profile, "learning_level", None)
+                    or "Not assessed"
+                ),
+                "latest_score": (
+                    latest_diagnostic.percentage
+                    if latest_diagnostic
+                    else latest.score
+                    if latest
+                    else None
+                ),
+                "improvement": improvement,
+                "total_assessments": len(progress_records),
+                "latest_diagnostic": (
+                    {
+                        "score": latest_diagnostic.score,
+                        "total_questions": latest_diagnostic.total_questions,
+                        "percentage": latest_diagnostic.percentage,
+                        "level": latest_diagnostic.level,
+                    }
+                    if latest_diagnostic
+                    else None
+                ),
+            })
+
+        return {
+            "student": {
+                "id": current_user.id,
+                "name": (
+                    current_user.first_name
+                    + " "
+                    + current_user.last_name
+                )
+            },
+            "profiles": dashboard_profiles
+        }
+
     finally:
         db.close()

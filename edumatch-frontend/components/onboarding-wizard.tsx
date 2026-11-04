@@ -11,7 +11,7 @@ import { cn } from '@/lib/utils'
 import { createProfile, generateDiagnosticQuestions } from '@/lib/api'
 import { saveProfileId } from '@/lib/profile-storage'
 
-const preferences: { value: LearningMode; label: string; desc: string; icon: typeof BookOpen }[] = [
+const preferred_formats: { value: LearningMode; label: string; desc: string; icon: typeof BookOpen }[] = [
   { value: 'Visual', label: 'Visual', desc: 'Diagrams, videos, animations', icon: BookOpen },
   { value: 'Text', label: 'Text', desc: 'Articles, notes, references', icon: Type },
   { value: 'Interactive', label: 'Interactive', desc: 'Practice, quizzes, sandboxes', icon: MousePointerClick },
@@ -32,46 +32,44 @@ export function OnboardingWizard() {
   const steps = ['Pick a topic', 'How you learn', 'Your goal']
   const canContinue = step === 0 ? topic.trim().length > 0 : step === 2 ? goal.trim().length > 0 : true
 
- const handleSubmit = async () => {
-  setIsSubmitting(true)
-  setSubmitError(null)
+  const handleSubmit = async () => {
+    setIsSubmitting(true)
+    setSubmitError(null)
+    try {
+      const result = await createProfile({
+        name: name.trim() || 'Learner',
+        topic: topic.trim(),
+        preferred_format: preference.toLowerCase() as 'visual' | 'interactive' | 'text',
+        goal: goal.trim(),
+      })
 
-  try {
-    const result = await createProfile({
-      name: name.trim() || 'Learner',
-      topic: topic.trim(),
-      preferred_format: preference,
-      goal: goal.trim(),
-    })
+      const profileId = result.profile_id
+      if (!Number.isSafeInteger(profileId) || profileId <= 0) {
+        throw new Error('Backend did not return a valid profile ID.')
+      }
 
-    const profileId = result.profile_id
+      saveProfileId(profileId)
+      await generateDiagnosticQuestions(profileId)
 
-    if (!Number.isSafeInteger(profileId) || profileId <= 0) {
-      throw new Error('Backend did not return a profile ID.')
+      createTwin({
+        studentName: name.trim() || 'Learner',
+        topic: topic.trim(),
+        preference,
+        goal: goal.trim(),
+      })
+
+      router.push(`/quiz?profile_id=${profileId}`)
+    } catch (error) {
+      console.error('ONBOARDING ERROR:', error)
+      setSubmitError(
+        error instanceof Error
+          ? error.message
+          : 'Unable to start the diagnostic. Please try again.',
+      )
+    } finally {
+      setIsSubmitting(false)
     }
-
-    saveProfileId(profileId)
-    await generateDiagnosticQuestions(profileId)
-
-    createTwin({
-      studentName: name.trim() || 'Learner',
-      topic: topic.trim(),
-       preference,
-      goal: goal.trim(),
-    })
-
-    router.push(`/quiz?profile_id=${profileId}`)
-  } catch (error1) {
-    console.error('ONBOARDING ERROR:', error1)
-    setSubmitError(
-      error1 instanceof Error
-        ? error1.message
-        : 'Unable to start the diagnostic. Please try again.',
-    )
-  } finally {
-    setIsSubmitting(false)
   }
-};
   return (
     <div className="mx-auto flex w-full max-w-xl flex-col gap-6">
       <div className="flex items-center gap-2">
@@ -151,7 +149,7 @@ export function OnboardingWizard() {
             <div className="flex flex-col gap-3">
               <span className="text-sm font-medium text-foreground">Preferred format</span>
               <div className="grid gap-3 sm:grid-cols-3">
-                {preferences.map((p) => {
+                {preferred_formats.map((p) => {
                   const active = preference === p.value
                   return (
                     <button

@@ -7,7 +7,8 @@ import { ResourceCard } from '@/components/resource-card'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { useLearnTwin, type LearningMode } from '@/lib/learn-twin'
-import { getRecommendedResources } from '@/lib/resources'
+import { getRecommendedResources, type Resource } from '@/lib/resources'
+import { getStoredProfileId } from '@/lib/profile-storage'
 
 const suggestions = [
   'I keep getting lost in recursive problems',
@@ -36,10 +37,13 @@ function normalizeLearningMode(value: string): LearningMode {
   }
 }
 
-async function parseQuery(query: string, preference: LearningMode): Promise<Parsed> {
+function parseQuery(
+  query: string,
+  preference: LearningMode,
+  resources: Resource[],
+): Parsed {
   const q = query.toLowerCase()
-  const request = await getRecommendedResources(42);
-  const conceptMatch=request.resources.find((r) => q.includes(r.title))
+  const conceptMatch = resources.find((resource) => q.includes(resource.title))
   const concept = conceptMatch?.title ?? 'Recursion'
   const level = /interview|advanced|hard/.test(q)
     ? 'Advanced'
@@ -66,8 +70,8 @@ export function SearchExperience() {
   const [query, setQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [parsed, setParsed] = useState<Parsed | null>(null)
-  type Resource = Awaited<ReturnType<typeof getRecommendedResources>>['resources'][number]
   const [resources, setResources] = useState<Resource[]>([])
+  const [error, setError] = useState<string | null>(null)
 
   const results = useMemo(() => {
     if (!parsed) return []
@@ -96,11 +100,23 @@ export function SearchExperience() {
     if (!value.trim()) return
     setLoading(true)
     setParsed(null)
+    setError(null)
     try {
-      const nextParsed = await parseQuery(value, twin.preference)
-      const response = await getRecommendedResources(42)
+      const profileId = getStoredProfileId()
+      if (profileId === null) {
+        throw new Error('Complete onboarding before searching for learning resources.')
+      }
+
+      const response = await getRecommendedResources(profileId)
+      const nextParsed = parseQuery(value, twin.preference, response.resources)
       setParsed(nextParsed)
       setResources([...response.resources])
+    } catch (searchError) {
+      setError(
+        searchError instanceof Error
+          ? searchError.message
+          : 'Unable to curate resources right now.',
+      )
     } finally {
       setLoading(false)
     }
@@ -157,6 +173,12 @@ export function SearchExperience() {
           ))}
         </div>
       </form>
+
+      {error ? (
+        <p className="text-sm text-destructive" role="alert">
+          {error}
+        </p>
+      ) : null}
 
       {loading ? (
         <div className="flex items-center justify-center gap-2 py-16 text-muted-foreground">

@@ -2,12 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Compass, LayoutDashboard, Menu, Search, Sparkles, X } from 'lucide-react'
 import { Logo } from '@/components/logo'
 import { ThemeToggle } from '@/components/theme-toggle'
 import { Button } from '@/components/ui/button'
-import { useLearnTwin } from '@/lib/learn-twin'
+import { getCurrentUser } from '@/lib/api'
 import { cn } from '@/lib/utils'
 
 const navItems = [
@@ -20,7 +20,32 @@ const navItems = [
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
-  const { twin } = useLearnTwin()
+  const [identity, setIdentity] = useState<{ name: string } | null>(null)
+  const [identityStatus, setIdentityStatus] = useState<'loading' | 'ready' | 'unavailable'>('loading')
+
+  useEffect(() => {
+    let active = true
+
+    getCurrentUser()
+      .then((user) => {
+        if (active) {
+          setIdentity({
+            name: `${user.first_name} ${user.last_name}`.trim(),
+          })
+          setIdentityStatus('ready')
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setIdentity(null)
+          setIdentityStatus('unavailable')
+        }
+      })
+
+    return () => {
+      active = false
+    }
+  }, [])
 
   return (
     <div className="min-h-screen bg-background">
@@ -54,11 +79,19 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <ThemeToggle />
             <div className="hidden items-center gap-2 rounded-xl border border-border bg-card px-2.5 py-1.5 sm:flex">
               <span className="grid size-7 place-items-center rounded-lg bg-primary text-sm font-semibold text-primary-foreground">
-                {twin.studentName.charAt(0)}
+                {identityStatus === 'ready' ? identity?.name.charAt(0) || '?' : '…'}
               </span>
               <div className="pr-1 leading-tight">
-                <p className="text-xs font-semibold text-foreground">{twin.studentName}</p>
-                <p className="text-[11px] text-muted-foreground">Level {twin.level}</p>
+                <p className="text-xs font-semibold text-foreground">
+                  {identityStatus === 'loading'
+                    ? 'Loading account…'
+                    : identityStatus === 'ready'
+                      ? identity?.name || 'Account'
+                      : 'Account unavailable'}
+                </p>
+                <p className="text-[11px] text-muted-foreground">
+                  {identityStatus === 'ready' ? 'Signed in' : ' '}
+                </p>
               </div>
             </div>
             <Button

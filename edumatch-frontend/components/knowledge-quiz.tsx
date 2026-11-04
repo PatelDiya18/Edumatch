@@ -6,7 +6,7 @@ import { ArrowRight, BrainCircuit, Check, RotateCcw, X } from 'lucide-react'
 import { ProgressRing } from '@/components/progress-ring'
 import { Button } from '@/components/ui/button'
 import { Card } from '@/components/ui/card'
-import { getDiagnosticQuestions } from '@/lib/api'
+import { getDiagnosticQuestions, submitQuiz } from '@/lib/api'
 import { useLearnTwin, type Baseline, type DiagnosticQuestion } from '@/lib/learn-twin'
 import { getStoredProfileId, saveProfileId } from '@/lib/profile-storage'
 import { cn } from '@/lib/utils'
@@ -23,6 +23,8 @@ export function KnowledgeQuiz({ profileId }: { profileId?: string }) {
   const [step, setStep] = useState(0)
   const [answers, setAnswers] = useState<Record<string, number>>({})
   const [result, setResult] = useState<Baseline | null>(null)
+  const [isSubmitting, setIsSubmitting] = useState(false)
+  const [submitError, setSubmitError] = useState<string | null>(null)
 
   useEffect(() => {
     try {
@@ -59,13 +61,13 @@ export function KnowledgeQuiz({ profileId }: { profileId?: string }) {
     try {
       const generated = await getDiagnosticQuestions(resolvedProfileId)
       setDiagnosticTopic(generated.topic)
-      setQuestions(generated.questions.map((question, index) => ({
-        id: `question-${index}`,
+      setQuestions(generated.questions.map((question) => ({
+        id: String(question.id),
         concept: question.subtopic,
         prompt: question.question,
         options: question.options,
-        answer: question.correct_answer,
-        explain: question.explanation,
+        answer: -1,
+        explain: '',
       })))
       setStep(0)
       setAnswers({})
@@ -90,11 +92,56 @@ export function KnowledgeQuiz({ profileId }: { profileId?: string }) {
     if (current) setAnswers((prev) => ({ ...prev, [current.id]: index }))
   }
 
-  const next = () => {
+  const next = async () => {
     if (step < total - 1) {
       setStep((s) => s + 1)
-    } else {
-      setResult(seedFromDiagnostic(answers, questions))
+      return
+    }
+
+    if (resolvedProfileId === null) {
+      setSubmitError('A valid profile is required to submit this diagnostic.')
+      return
+    }
+
+    setIsSubmitting(true)
+    setSubmitError(null)
+    try {
+      const submitted = await submitQuiz(
+        resolvedProfileId,
+        questions.map((question) => ({
+          question_id: Number(question.id),
+          selected_answer: answers[question.id],
+        })),
+      )
+      const reviewById = new Map(
+        submitted.answer_review.map((review) => [review.question_id, review]),
+      )
+      const reviewedQuestions = questions.map((question) => {
+        const review = reviewById.get(Number(question.id))
+        if (!review) {
+          throw new Error('The backend did not return a complete diagnostic review.')
+        }
+        return {
+          ...question,
+          answer: review.correct_answer,
+          explain: review.explanation ?? '',
+        }
+      })
+
+      setQuestions(reviewedQuestions)
+      const baseline = seedFromDiagnostic(answers, reviewedQuestions)
+      setResult({
+        ...baseline,
+        score: submitted.percentage,
+        correct: submitted.score,
+        total: submitted.total_questions,
+      })
+    } catch (error) {
+      setSubmitError(
+        error instanceof Error ? error.message : 'Unable to submit your diagnostic.',
+      )
+    } finally {
+      setIsSubmitting(false)
     }
   }
 
@@ -226,13 +273,22 @@ export function KnowledgeQuiz({ profileId }: { profileId?: string }) {
         <Button
           size="lg"
           className="h-11 rounded-xl px-6"
-          onClick={next}
-          disabled={selected === undefined}
+          onClick={() => void next()}
+          disabled={selected === undefined || isSubmitting}
         >
-          {step === total - 1 ? `See my baseline (${answeredCount}/${total})` : 'Next'}
+          {isSubmitting
+            ? 'Submitting...'
+            : step === total - 1
+              ? `See my baseline (${answeredCount}/${total})`
+              : 'Next'}
           <ArrowRight className="size-4" />
         </Button>
       </div>
+      {submitError ? (
+        <p className="text-sm text-destructive" role="alert">
+          {submitError}
+        </p>
+      ) : null}
     </div>
   )
 }

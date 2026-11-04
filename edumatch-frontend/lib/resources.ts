@@ -1,13 +1,6 @@
-const API_URL =
-    process.env.NEXT_PUBLIC_API_URL ||
-    "http://127.0.0.1:8000";
+const API_URL = "/api/backend";
 
-
-export type ResourceFormat =
-    | "visual"
-    | "interactive"
-    | "text";
-
+export type ResourceFormat = "visual" | "interactive" | "text";
 
 export interface Resource {
     title: string;
@@ -16,7 +9,6 @@ export interface Resource {
     reason: string;
     relevance_score: number;
 }
-
 
 export interface ResourceResponse {
     profile_id: number;
@@ -28,30 +20,47 @@ export interface ResourceResponse {
     resource_count: number;
     preferred_recommendations: Resource[];
     alternative_recommendations: Resource[];
+    resources: Resource[];
 }
+
 export async function getRecommendedResources(
-  profileId: number | string
+    profileId: number | string
 ): Promise<ResourceResponse> {
-  const response = await fetch(
-    `${API_URL}/resources/profile/${profileId}`,
-    {
-      method: "GET",
-      cache: "no-store",
+    const parsedProfileId = Number(profileId);
+
+    if (!Number.isSafeInteger(parsedProfileId) || parsedProfileId <= 0) {
+        throw new Error("Invalid profile ID.");
     }
-  );
 
-  const data = await response.json().catch(() => null);
+    const token = ""; // Do not use this if authentication is cookie-based.
 
-  if (!response.ok) {
-    throw new Error(data?.detail || "Unable to load resources");
-  }
+    const response = await fetch(
+        `/api/backend/resources/profile/${parsedProfileId}`,
+        {
+            method: "GET",
+            credentials: "include",
+            cache: "no-store",
+        }
+    );
 
-  if (
-    !Array.isArray(data?.preferred_recommendations) ||
-    !Array.isArray(data?.alternative_recommendations)
-  ) {
-    throw new Error("Invalid resource response from backend.");
-  }
+    const data = await response.json().catch(() => null);
 
-  return data as ResourceResponse;
+    if (!response.ok) {
+        throw new Error(data?.detail || "Unable to load resources.");
+    }
+
+    if (
+        !Array.isArray(data?.preferred_recommendations) ||
+        !Array.isArray(data?.alternative_recommendations)
+    ) {
+        throw new Error("Invalid resource response from backend.");
+    }
+
+    return {
+        ...data,
+        resources: [
+            ...data.preferred_recommendations,
+            ...data.alternative_recommendations,
+        ],
+    } as ResourceResponse;
 }

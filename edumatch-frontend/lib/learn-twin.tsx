@@ -53,34 +53,29 @@ export type DiagnosticQuestion = {
   explain: string
 }
 
-const defaultTwin: LearningTwin = {
-  studentName: 'Aarav',
-  topic: 'Data Structures & Algorithms',
-  goal: 'Ace my upcoming DSA midterm',
-  preference: 'Visual',
-  level: 7,
-  xp: 2450,
-  xpToNext: 3000,
-  streak: 12,
-  metrics: {
-    understanding: 72,
-    retention: 58,
-    application: 64,
-    confidence: 45,
-  },
-  concepts: [
-    { name: 'Big-O Notation', mastery: 82, status: 'strong' },
-    { name: 'Recursion', mastery: 38, status: 'weak' },
-    { name: 'Linked Lists', mastery: 66, status: 'progress' },
-    { name: 'Hash Maps', mastery: 74, status: 'strong' },
-    { name: 'Sorting Algorithms', mastery: 71, status: 'progress' },
-    { name: 'Dynamic Programming', mastery: 29, status: 'weak' },
-  ],
-  weakAreas: ['Recursion', 'Dynamic Programming'],
-  revisionNeeded: ['Linked Lists', 'Sorting Algorithms'],
-  baseline: null,
-  postTest: null,
-  updated: false,
+function createEmptyTwin(): LearningTwin {
+  return {
+    studentName: '',
+    topic: '',
+    goal: '',
+    preference: 'Visual',
+    level: 0,
+    xp: 0,
+    xpToNext: 0,
+    streak: 0,
+    metrics: {
+      understanding: 0,
+      retention: 0,
+      application: 0,
+      confidence: 0,
+    },
+    concepts: [],
+    weakAreas: [],
+    revisionNeeded: [],
+    baseline: null,
+    postTest: null,
+    updated: false,
+  }
 }
 
 type OnboardingInput = {
@@ -97,6 +92,7 @@ type LearnTwinContextValue = {
   applyPostTest: (answers: Record<string, number>, questions: DiagnosticQuestion[]) => Baseline
   applyFeedback: (helpful: boolean, mode: LearningMode) => void
   resetUpdated: () => void
+  resetTwin: () => void
 }
 
 const statusForMastery = (mastery: number): ConceptStatus =>
@@ -122,18 +118,15 @@ function scoreAnswers(answers: Record<string, number>, questions: DiagnosticQues
 }
 
 export function LearnTwinProvider({ children }: { children: React.ReactNode }) {
-  const [twin, setTwin] = useState<LearningTwin>(defaultTwin)
+  const [twin, setTwin] = useState<LearningTwin>(createEmptyTwin)
 
   const createTwin = useCallback((input: OnboardingInput) => {
-    setTwin((prev) => ({
-      ...prev,
-      studentName: input.studentName?.trim() || prev.studentName,
+    setTwin(() => ({
+      ...createEmptyTwin(),
+      studentName: input.studentName?.trim() || '',
       topic: input.topic,
       goal: input.goal,
       preference: input.preference,
-      baseline: null,
-      postTest: null,
-      updated: false,
     }))
   }, [])
 
@@ -226,9 +219,13 @@ export function LearnTwinProvider({ children }: { children: React.ReactNode }) {
     setTwin((prev) => (prev.updated ? { ...prev, updated: false } : prev))
   }, [])
 
+  const resetTwin = useCallback(() => {
+    setTwin(createEmptyTwin())
+  }, [])
+
   const value = useMemo(
-    () => ({ twin, createTwin, seedFromDiagnostic, applyPostTest, applyFeedback, resetUpdated }),
-    [twin, createTwin, seedFromDiagnostic, applyPostTest, applyFeedback, resetUpdated],
+    () => ({ twin, createTwin, seedFromDiagnostic, applyPostTest, applyFeedback, resetUpdated, resetTwin }),
+    [twin, createTwin, seedFromDiagnostic, applyPostTest, applyFeedback, resetUpdated, resetTwin],
   )
 
   return <LearnTwinContext.Provider value={value}>{children}</LearnTwinContext.Provider>

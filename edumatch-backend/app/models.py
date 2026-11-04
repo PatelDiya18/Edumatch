@@ -1,10 +1,64 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Column, Integer, String, DateTime, Float
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
 from .database import Base
+
+
+class User(Base):
+    __tablename__ = "users"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    first_name = Column(String(100), nullable=False)
+    last_name = Column(String(100), nullable=False)
+
+    email = Column(
+        String(255),
+        unique=True,
+        index=True,
+        nullable=False
+    )
+
+    password_hash = Column(String(255), nullable=False)
+
+    phone_number = Column(String(20), nullable=False)
+
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
+
+    profiles = relationship("StudentProfile", back_populates="user")
+
+
+class LearningProgress(Base):
+    __tablename__ = "learning_progress"
+
+    id = Column(Integer, primary_key=True, index=True)
+
+    profile_id = Column(
+        Integer,
+        ForeignKey("student_profiles.id"),
+        nullable=False,
+        index=True
+    )
+
+    assessment_type = Column(String(50), nullable=False)
+
+    score = Column(Float, nullable=False)
+
+    level = Column(String(30), nullable=False)
+
+    attempted_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False
+    )
 
 
 class StudentProfile(Base):
@@ -20,6 +74,14 @@ class StudentProfile(Base):
         DateTime(timezone=True),
         server_default=func.now()
     )
+    user_id = Column(
+    Integer,
+    ForeignKey("users.id"),
+    nullable=True,
+    index=True
+)
+
+    user = relationship("User", back_populates="profiles")
 
 
 class Resource(Base):
@@ -59,9 +121,17 @@ class DiagnosticResult(Base):
 
     id: Any = Column(Integer, primary_key=True, index=True)
     profile_id: Any = Column(Integer, nullable=False, index=True)
+    user_id = Column(
+        Integer,
+        ForeignKey("users.id"),
+        nullable=False
+    )
     score: Any = Column(Integer, nullable=False)
     total_questions: Any = Column(Integer, nullable=False)
     percentage: Any = Column(Float, nullable=False)
     level: Any = Column(String, nullable=False)
 
-    created_at: Any = Column(DateTime, default=datetime.utcnow)
+    created_at: Any = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc)
+    )

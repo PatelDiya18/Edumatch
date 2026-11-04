@@ -12,10 +12,8 @@ export function MarketingHeader() {
         <Logo href="/" />
         <div className="flex items-center gap-2">
           <ThemeToggle />
-          <Button variant="ghost" size="lg" className="h-9 rounded-xl px-3" render={<Link href="/quiz" />}>
-            Log in
-          </Button>
-          <Button size="lg" className="h-9 rounded-xl px-4" render={<Link href="/onboarding" />}>
+          
+          <Button size="lg" className="h-9 rounded-xl px-4" render={<Link href="/auth" />}>
             Get started
           </Button>
         </div>

@@ -31,46 +31,59 @@ GROQ_MODEL = "openai/gpt-oss-120b"
 
 
 
-def generate_diagnostic_questions(
-    topic: str,
-    goal: str
-):
+
+def generate_diagnostic_questions(topic: str, goal: str):
     try:
         groq_module = importlib.import_module("groq")
     except ModuleNotFoundError as exc:
         if exc.name != "groq":
             raise
         raise RuntimeError(
-            "The Groq package is required. Install it with 'pip install groq'."
+            "Install Groq using: pip install groq"
         ) from exc
 
-    client = groq_module.Groq()
+    client = groq_module.Groq(api_key=GROQ_API_KEY)
+
+    topic = topic.strip()
+    goal = goal.strip()
 
     prompt = f"""
-Create a diagnostic quiz to assess a student's understanding.
+You are an expert educational assessment designer.
 
-Topic: {topic.strip()}
-Learning goal: {goal.strip()}
+Generate a personalized diagnostic assessment.
 
-Generate exactly 10 multiple-choice questions.
+STUDENT INFORMATION:
+Topic: {topic}
+Learning goal: {goal}
 
-Requirements for every question:
-- Include a meaningful subtopic.
-- Include a clear question.
-- Provide exactly 4 distinct options.
-- correct_answer must be an integer from 0 to 3.
-- The integer identifies the correct option by zero-based index.
-- difficulty must be beginner, intermediate, or advanced.
-- Include a concise explanation of the correct answer.
-- Assess understanding, not just memorization.
+TASK:
+Generate exactly 10 original multiple-choice questions.
 
-Return only a JSON object with this structure:
+DIFFICULTY DISTRIBUTION:
+- 3 beginner questions
+- 4 intermediate questions
+- 3 advanced questions
+
+QUESTION REQUIREMENTS:
+1. Every question must directly relate to the student's topic.
+2. Cover different subtopics.
+3. Avoid repeated concepts and repeated questions.
+4. Test conceptual understanding and practical application.
+5. Include exactly four distinct options.
+6. Only one option must be correct.
+7. correct_answer must be an integer from 0 to 3.
+8. Difficulty must be beginner, intermediate, or advanced.
+9. Include a meaningful explanation.
+10. Make questions appropriate to the student's learning goal.
+
+Return ONLY valid JSON in this structure:
+
 {{
   "questions": [
     {{
       "subtopic": "string",
       "question": "string",
-      "options": ["option A", "option B", "option C", "option D"],
+      "options": ["A", "B", "C", "D"],
       "correct_answer": 0,
       "difficulty": "beginner",
       "explanation": "string"
@@ -78,19 +91,17 @@ Return only a JSON object with this structure:
   ]
 }}
 
-The questions array must contain exactly 10 questions.
-Do not use Markdown or code fences.
+Do not include Markdown or code fences.
 """
 
     last_error = None
 
-    # Retry only temporary connection, timeout, server, or rate-limit errors.
     for attempt in range(1, 4):
         try:
             logger.info(
-                "Generating quiz for topic=%r, attempt=%s/3",
+                "Generating Groq quiz for topic=%s, attempt=%s",
                 topic,
-                attempt,
+                attempt
             )
 
             response = client.chat.completions.create(
@@ -99,107 +110,55 @@ Do not use Markdown or code fences.
                     {
                         "role": "system",
                         "content": (
-                            "You generate educational assessments. "
-                            "Return a complete JSON object only."
-                        ),
+                            "You are an educational assessment expert. "
+                            "Return only valid JSON."
+                        )
                     },
                     {
                         "role": "user",
-                        "content": prompt,
-                    },
+                        "content": prompt
+                    }
                 ],
-                temperature=0.2,
-
+                temperature=0.6,
                 max_tokens=6000,
-
-                response_format={
-                    "type": "json_object"
-                }
+                response_format={"type": "json_object"}
             )
 
             if not response.choices:
+                raise RuntimeError("Groq returned no choices.")
 
-                raise RuntimeError(
-                    "Groq returned zero choices."
-                )
-
-
-            message = response.choices[0].message
-
-            content = message.content
-
+            choice = response.choices[0]
 
             logger.info(
                 "Groq finish reason: %s",
-                response.choices[0].finish_reason
+                choice.finish_reason
             )
 
+            if choice.finish_reason == "length":
+                raise RuntimeError(
+                    "Groq response was incomplete due to token limit."
+                )
 
-            logger.info(
-                "Groq response content length: %s",
-                len(content) if content else 0
-            )
-
+            content = choice.message.content
 
             if not content:
+                raise RuntimeError("Groq returned empty content.")
 
-                raise RuntimeError(
-                    "Groq returned empty response content."
-                )
-
-
-            # ----------------------------------
-            # Parse JSON
-            # ----------------------------------
-
-            try:
-
-                data = json.loads(content)
-            except json.JSONDecodeError as exc:
-
-                logger.error(
-                    "Groq returned invalid JSON: %s",
-                    content
-                )
-
-                raise RuntimeError(
-                    "Groq returned invalid JSON."
-                ) from exc
-
-
-            # ----------------------------------
-            # Validate questions
-            # ----------------------------------
+            data = json.loads(content)
 
             questions = data.get("questions")
 
-            if not isinstance(questions, list):
-
+            if not isinstance(questions, list) or len(questions) != 10:
                 raise RuntimeError(
-                    "Groq response does not contain "
-                    "a valid questions list."
+                    "Groq must return exactly 10 questions."
                 )
 
-
-            if len(questions) != 10:
-
-                raise RuntimeError(
-                    f"Expected 10 questions but Groq "
-                    f"returned {len(questions)}."
-                )
-
-
-            for index, question in enumerate(
-                questions,
-                start=1
-            ):
+            for index, question in enumerate(questions, start=1):
 
                 if not isinstance(question, dict):
-
                     raise RuntimeError(
                         f"Question {index} is invalid."
                     )
-
 
                 required_fields = [
                     "subtopic",
@@ -210,98 +169,85 @@ Do not use Markdown or code fences.
                     "explanation"
                 ]
 
-
                 for field in required_fields:
-
                     if field not in question:
-
                         raise RuntimeError(
-                            f"Question {index} is missing "
-                            f"'{field}'."
+                            f"Question {index} missing {field}."
                         )
 
+                    if question[field] is None:
+                        raise RuntimeError(
+                            f"Question {index} has empty {field}."
+                        )
 
                 options = question["options"]
 
-
-                if not isinstance(options, list):
-
+                if (
+                    not isinstance(options, list)
+                    or len(options) != 4
+                    or not all(
+                        isinstance(option, str) and option.strip()
+                        for option in options
+                    )
+                ):
                     raise RuntimeError(
-                        f"Question {index} options "
-                        f"must be a list."
+                        f"Question {index} must have four valid options."
                     )
 
-
-                if len(options) != 4:
-
+                if len(set(options)) != 4:
                     raise RuntimeError(
-                        f"Question {index} must have "
-                        f"exactly 4 options."
+                        f"Question {index} has duplicate options."
                     )
 
+                correct_answer = question["correct_answer"]
 
-                correct_answer = (
-                    question["correct_answer"]
-                )
-
-
-                if correct_answer not in [0, 1, 2, 3]:
-
+                if (
+                    type(correct_answer) is not int
+                    or correct_answer not in [0, 1, 2, 3]
+                ):
                     raise RuntimeError(
-                        f"Question {index} has invalid "
-                        f"correct_answer."
+                        f"Question {index} has invalid correct_answer."
                     )
 
-
-                difficulty = (
-                    str(question["difficulty"])
-                    .lower()
-                )
-
+                difficulty = str(question["difficulty"]).lower()
 
                 if difficulty not in [
                     "beginner",
                     "intermediate",
                     "advanced"
                 ]:
-
                     raise RuntimeError(
-                        f"Question {index} has invalid "
-                        f"difficulty."
+                        f"Question {index} has invalid difficulty."
                     )
 
+                question["difficulty"] = difficulty
+
+                for field in ["subtopic", "question", "explanation"]:
+                    if not isinstance(question[field], str) or not question[field].strip():
+                        raise RuntimeError(
+                            f"Question {index} has invalid {field}."
+                        )
 
             logger.info(
-                "Successfully generated 10 diagnostic questions."
+                "Successfully generated 10 Groq diagnostic questions."
             )
-
 
             return data
 
-
         except Exception as exc:
-
             last_error = exc
 
             logger.exception(
-                "Diagnostic quiz generation attempt %s failed.",
+                "Groq quiz generation attempt %s failed.",
                 attempt
             )
 
-
             if attempt < 3:
-
                 wait_time = 2 ** attempt
-
-                logger.info(
-                    "Retrying in %s seconds...",
-                    wait_time
-                )
-
                 time.sleep(wait_time)
 
-
     raise RuntimeError(
-        "Unable to generate diagnostic quiz after "
-        f"3 attempts. Last error: {last_error}"
+        f"Unable to generate diagnostic quiz after 3 attempts. "
+        f"Last error: {last_error}"
     )
+    

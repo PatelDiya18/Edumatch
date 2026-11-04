@@ -7,7 +7,8 @@ import {
     getRecommendedResources,
     type ResourceResponse,
 } from "@/lib/resources";
-import { getStoredProfileId, saveProfileId } from "@/lib/profile-storage";
+import { getMyProfile } from "@/lib/api";
+import { saveProfileId } from "@/lib/profile-storage";
 
 
 export default function ResourcesPage() {
@@ -51,7 +52,7 @@ function ResourcesContent() {
             try {
                 const resolvedProfileId =
                     profileId === null
-                        ? getStoredProfileId()
+                        ? (await getMyProfile()).profile_id
                         : Number(profileId);
 
                 if (resolvedProfileId === null) {
