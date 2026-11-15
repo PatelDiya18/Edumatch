@@ -96,7 +96,7 @@ export default function QuizPage() {
     try {
       setIsSubmitting(true)
 
-      await submitQuiz(
+      const submitted = await submitQuiz(
         profileId,
         questions.map((question) => ({
           question_id: question.id,
@@ -104,7 +104,7 @@ export default function QuizPage() {
         })),
       )
 
-      router.push(`/resources?id=${profileId}`)
+      router.push(`/quiz/results?profile_id=${submitted.profile_id}`)
     } catch (error) {
       setSubmitError(
         error instanceof Error ? error.message : "Unable to submit your diagnostic.",
@@ -206,7 +206,7 @@ export default function QuizPage() {
               disabled={answers[q.id] === undefined || isSubmitting}
               className="gap-2"
             >
-              {isSubmitting ? 'Analyzing Twin...' : 'Complete & View Resources'}
+              {isSubmitting ? 'Analyzing your answers...' : 'Complete & View Results'}
               <ArrowRight className="size-4" />
             </Button>
           )}

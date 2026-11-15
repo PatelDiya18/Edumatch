@@ -1,7 +1,7 @@
 "use client";
 
-import { useState, type FormEvent } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useEffect, useState, type FormEvent } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useLearnTwin } from "@/lib/learn-twin";
 import { clearStoredProfileId } from "@/lib/profile-storage";
 
@@ -17,10 +17,26 @@ interface AuthResponse {
 }
 
 export default function AuthPage() {
+  return (
+    <Suspense
+      fallback={<div className="min-h-screen bg-[#0f0e17]" aria-busy="true" />}
+    >
+      <AuthContent />
+    </Suspense>
+  );
+}
+
+function AuthContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const mode = searchParams.get("mode");
   const { resetTwin } = useLearnTwin();
 
-  const [isLogin, setIsLogin] = useState(false);
+  const [isLogin, setIsLogin] = useState(mode === "login");
+
+  useEffect(() => {
+    setIsLogin(mode === "login");
+  }, [mode]);
 
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -108,8 +124,13 @@ export default function AuthPage() {
           <button
             type="button"
             onClick={() => {
-              setIsLogin(!isLogin);
+              const nextIsLogin = !isLogin;
+              setIsLogin(nextIsLogin);
               setError("");
+              router.replace(
+                `/auth?mode=${nextIsLogin ? "login" : "signup"}`,
+                { scroll: false }
+              );
             }}
             className="text-sm text-purple-400 hover:underline"
           >

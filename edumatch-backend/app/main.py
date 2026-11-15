@@ -1,4 +1,5 @@
 import logging
+import json
 
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -418,6 +419,17 @@ def submit_quiz(
         answer_by_question_id = {
             answer.question_id: answer for answer in submission.answers
         }
+        answer_review = [
+            {
+                "question_id": question.id,
+                "selected_answer": answer_by_question_id[question.id].selected_answer,
+                "correct_answer": question.correct_answer,
+                "subtopic": question.subtopic,
+                "explanation": question.explanation,
+            }
+            for question in questions
+        ]
+        result.answer_review = json.dumps(answer_review)
 
         # 9. Commit and refresh database record
         db.commit()
@@ -433,16 +445,7 @@ def submit_quiz(
             "wrong_answers": total_questions - score,
             "percentage": round(percentage, 2),
             "level": level,
-            "answer_review": [
-                {
-                    "question_id": question.id,
-                    "selected_answer": answer_by_question_id[question.id].selected_answer,
-                    "correct_answer": question.correct_answer,
-                    "subtopic": question.subtopic,
-                    "explanation": question.explanation,
-                }
-                for question in questions
-            ],
+            "answer_review": answer_review,
         }
 
     except HTTPException:
@@ -457,6 +460,202 @@ def submit_quiz(
             status_code=500,
             detail="Failed to submit diagnostic quiz"
         ) from exc
+
+
+@app.get("/quiz/results/{profile_id}")
+def get_latest_quiz_result(
+    profile_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = db.query(StudentProfile).filter(
+        StudentProfile.id == profile_id,
+        StudentProfile.user_id == current_user.id,
+    ).first()
+    if profile is None:
+        raise HTTPException(status_code=404, detail="Profile not found")
+
+    result = (
+        db.query(DiagnosticResult)
+        .filter(
+            DiagnosticResult.profile_id == profile.id,
+            DiagnosticResult.user_id == current_user.id,
+        )
+        .order_by(DiagnosticResult.created_at.desc(), DiagnosticResult.id.desc())
+        .first()
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail="No diagnostic result found")
+
+    try:
+        answer_review = json.loads(result.answer_review) if result.answer_review else []
+    except json.JSONDecodeError as exc:
+        logger.exception("Stored answer review is invalid for result %s", result.id)
+        raise HTTPException(
+            status_code=500,
+            detail="The saved diagnostic review is unavailable.",
+        ) from exc
+
+    return {
+        "profile_id": profile.id,
+        "topic": profile.topic,
+        "score": result.score,
+        "total_questions": result.total_questions,
+        "percentage": result.percentage,
+        "level": result.level,
+        "created_at": result.created_at,
+        "answer_review": answer_review,
+    }
+
+
+@app.get("/twin")
+def get_learning_twin(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    profile = (
+        db.query(StudentProfile)
+        .filter(StudentProfile.user_id == current_user.id)
+        .order_by(StudentProfile.id.desc())
+        .first()
+    )
+    if profile is None:
+        raise HTTPException(status_code=404, detail="No profile found for this user.")
+
+    results = (
+        db.query(DiagnosticResult)
+        .filter(
+            DiagnosticResult.profile_id == profile.id,
+            DiagnosticResult.user_id == current_user.id,
+        )
+        .order_by(DiagnosticResult.created_at.asc(), DiagnosticResult.id.asc())
+        .all()
+    )
+
+    history_complete = bool(results) and all(
+        result.answer_review is not None for result in results
+    )
+    review_history: list[dict[str, list[dict[str, object]]]] = []
+    for result in results:
+        if not result.answer_review:
+            review_history.append({})
+            continue
+        try:
+            decoded = json.loads(result.answer_review)
+        except json.JSONDecodeError as exc:
+            logger.exception("Stored answer review is invalid for result %s", result.id)
+            raise HTTPException(
+                status_code=500,
+                detail="Saved diagnostic history is unavailable.",
+            ) from exc
+        if not isinstance(decoded, list):
+            raise HTTPException(
+                status_code=500,
+                detail="Saved diagnostic history is invalid.",
+            )
+        by_subtopic: dict[str, list[dict[str, object]]] = {}
+        for answer in decoded:
+            if not isinstance(answer, dict) or not isinstance(answer.get("subtopic"), str):
+                continue
+            subtopic = answer["subtopic"].strip()
+            selected = answer.get("selected_answer")
+            correct = answer.get("correct_answer")
+            if not subtopic or not isinstance(selected, int) or not isinstance(correct, int):
+                continue
+            by_subtopic.setdefault(subtopic, []).append(
+                {"correct": selected == correct}
+            )
+        review_history.append(by_subtopic)
+
+    topics: list[dict[str, object]] = []
+    all_subtopics = sorted(
+        {
+            question.subtopic.strip()
+            for question in db.query(DiagnosticQuestion)
+            .filter(DiagnosticQuestion.profile_id == profile.id)
+            .all()
+            if question.subtopic and question.subtopic.strip()
+        }
+        | {
+            subtopic
+            for attempt in review_history
+            for subtopic in attempt
+        },
+        key=str.casefold,
+    )
+
+    for subtopic in all_subtopics:
+        attempts = [
+            answers[subtopic]
+            for answers in review_history
+            if subtopic in answers and answers[subtopic]
+        ]
+        if not attempts:
+            if history_complete:
+                topics.append(
+                    {
+                        "id": subtopic,
+                        "name": subtopic,
+                        "status": "not_started",
+                        "strength": None,
+                        "note": "No saved quiz answers for this topic yet.",
+                    }
+                )
+            continue
+
+        latest_answers = attempts[-1]
+        latest_strength = round(
+            sum(answer["correct"] for answer in latest_answers)
+            / len(latest_answers)
+            * 100
+        )
+        if latest_strength >= 80:
+            topics.append(
+                {
+                    "id": subtopic,
+                    "name": subtopic,
+                    "status": "solid",
+                    "strength": latest_strength,
+                    "note": f"Latest recorded performance: {latest_strength}%.",
+                }
+            )
+            continue
+
+        if len(attempts) >= 2:
+            previous_answers = attempts[-2]
+            previous_strength = round(
+                sum(answer["correct"] for answer in previous_answers)
+                / len(previous_answers)
+                * 100
+            )
+            if latest_strength < previous_strength:
+                topics.append(
+                    {
+                        "id": subtopic,
+                        "name": subtopic,
+                        "status": "fading",
+                        "strength": latest_strength,
+                        "note": (
+                            f"Performance decreased from {previous_strength}% "
+                            f"to {latest_strength}% across saved quizzes."
+                        ),
+                    }
+                )
+
+    return {
+        "profile_id": profile.id,
+        "topicName": profile.topic,
+        "readiness": results[-1].percentage if results else None,
+        "trend": [
+            {
+                "date": result.created_at,
+                "readiness": result.percentage,
+            }
+            for result in results
+        ],
+        "topics": topics,
+        "history_available": history_complete,
+    }
 
 
 @app.get("/resources/profile/{profile_id}")
@@ -628,6 +827,19 @@ def get_dashboard(
                 .first()
             )
 
+            baseline_diagnostic = (
+                db.query(DiagnosticResult)
+                .filter(
+                    DiagnosticResult.user_id == current_user.id,
+                    DiagnosticResult.profile_id == profile.id,
+                )
+                .order_by(
+                    DiagnosticResult.created_at.asc(),
+                    DiagnosticResult.id.asc(),
+                )
+                .first()
+            )
+
             dashboard_profiles.append({
                 "profile_id": profile.id,
                 "topic": profile.topic,
@@ -658,6 +870,17 @@ def get_dashboard(
                         "level": latest_diagnostic.level,
                     }
                     if latest_diagnostic
+                    else None
+                ),
+                "baseline": (
+                    {
+                        "score": baseline_diagnostic.score,
+                        "total_questions": baseline_diagnostic.total_questions,
+                        "percentage": baseline_diagnostic.percentage,
+                        "level": baseline_diagnostic.level,
+                        "created_at": baseline_diagnostic.created_at,
+                    }
+                    if baseline_diagnostic
                     else None
                 ),
             })

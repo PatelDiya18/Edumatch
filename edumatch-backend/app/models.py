@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 
@@ -130,6 +130,7 @@ class DiagnosticResult(Base):
     total_questions: Any = Column(Integer, nullable=False)
     percentage: Any = Column(Float, nullable=False)
     level: Any = Column(String, nullable=False)
+    answer_review: Any = Column(Text, nullable=True)
 
     created_at: Any = Column(
         DateTime(timezone=True),

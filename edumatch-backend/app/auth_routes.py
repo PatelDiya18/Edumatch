@@ -3,7 +3,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
-
 from app.auth import (
     create_access_token,
     get_current_user,
@@ -18,7 +17,6 @@ from app.auth_schemas import (
     AuthResponse,
     UserResponse
 )
-
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -103,3 +101,7 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
 @router.get("/me", response_model=UserResponse)
 def get_me(current_user: User = Depends(get_current_user)):
     return current_user
+
+@router.post("/logout")
+def logout():
+    return {"message": "Logged out successfully"}

@@ -1,3 +1,4 @@
+
 import { NextRequest, NextResponse } from "next/server";
 
 const backendUrl =
@@ -12,11 +13,34 @@ async function proxy(
 ) {
   const { path } = await context.params;
 
- const target =
-  backendUrl.replace(/\/$/, "") +
-  "/" +
-  path.join("/") +
-  request.nextUrl.search;
+  // Handle logout directly in Next.js
+  // FastAPI does not need a /auth/logout endpoint.
+  if (
+    request.method === "POST" &&
+    path[0] === "auth" &&
+    path[1] === "logout"
+  ) {
+    const logoutResponse = NextResponse.json({
+      message: "Logged out successfully",
+    });
+
+    // Remove the HttpOnly JWT cookie
+    logoutResponse.cookies.set(accessTokenCookie, "", {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      path: "/api/backend",
+      maxAge: 0,
+    });
+
+    return logoutResponse;
+  }
+
+  const target =
+    backendUrl.replace(/\/$/, "") +
+    "/" +
+    path.join("/") +
+    request.nextUrl.search;
 
   // Read JWT from the HttpOnly cookie
   const token = request.cookies.get(accessTokenCookie)?.value;
@@ -127,7 +151,6 @@ async function proxy(
     }
 
     return proxiedResponse;
-
   } catch (error) {
     console.error("Backend proxy error:", error);
 

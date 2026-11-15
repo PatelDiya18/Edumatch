@@ -53,17 +53,15 @@ export function LandingHero() {
           <Button
             size="lg"
             className="h-11 rounded-xl px-5 text-base"
-            render={<Link href="/auth" />}
+            render={<Link href="/auth?mode=signup" />}
           >
             Create my Learning Twin
             <ArrowRight className="size-4" />
           </Button>
-          
         </div>
         <p className="pt-1 text-sm text-muted-foreground">
-          Already have a twin?{' '}
-          <Link href="/auth" className="font-medium text-primary hover:underline">
-            Go to your dashboard
+          <Link href="/auth?mode=login" className="font-medium text-primary hover:underline">
+            Already have an account? Log in
           </Link>
         </p>
       </div>

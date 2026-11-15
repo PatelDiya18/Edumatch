@@ -29,6 +29,11 @@ def migrate_auth_schema() -> None:
                     "ALTER TABLE diagnostic_results "
                     "ADD COLUMN user_id INTEGER REFERENCES users(id)"
                 )
+            if "answer_review" not in result_columns:
+                connection.exec_driver_sql(
+                    "ALTER TABLE diagnostic_results "
+                    "ADD COLUMN answer_review TEXT"
+                )
             if "student_profiles" in tables:
                 connection.exec_driver_sql(
                     """
